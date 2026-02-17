@@ -3,597 +3,829 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import '../services/app_state.dart';
 import '../services/file_server.dart';
-import '../services/wifi_manager.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class ReceiveScreen extends StatefulWidget {
   final FileServer fileServer;
-  final WiFiManager wifiManager;
-
-  const ReceiveScreen({
-    super.key,
-    required this.fileServer,
-    required this.wifiManager,
-  });
+  const ReceiveScreen({super.key, required this.fileServer});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
 class _ReceiveScreenState extends State<ReceiveScreen> {
-  final TextEditingController _codeController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  
+  // Adımlar: 0=WiFi bağlan, 1=kod gir/QR tara, 2=dosya önizleme
+  int _step = 0;
+  bool _wifiConfirmed = false;
+
+  final _codeCtrl = TextEditingController();
+  final _pwCtrl = TextEditingController();
+
   bool _showScanner = false;
   bool _isLoading = false;
-  bool _requiresPassword = false;
-  
+  bool _isDownloading = false;
+  bool _downloadDone = false;
+
+  // Dosya bilgileri
   String? _filename;
   int? _fileSize;
   int? _downloads;
   int? _maxDownloads;
   DateTime? _expiryTime;
+  bool _requiresPassword = false;
 
-  List<String> _availableNetworks = [];
-  bool _isScanning = false;
-  bool _isConnected = false;
+  // Hedef sunucu
+  String? _targetHost; // QR'dan veya gönderenden alınan IP
+  int _targetPort = 8080;
 
   @override
-  void initState() {
-    super.initState();
-    _scanForNetworks();
+  void dispose() {
+    _codeCtrl.dispose();
+    _pwCtrl.dispose();
+    super.dispose();
   }
 
-  Future<void> _scanForNetworks() async {
-    setState(() {
-      _isScanning = true;
+  // Android WiFi Ayarlarını Aç
+  void _openWifiSettings() {
+    // Bu yöntem her Android'de çalışır
+    const channel = MethodChannel('com.secureshare/settings');
+    channel.invokeMethod('openWifi').catchError((_) {
+      // Fallback zaten dialog gösterir
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Theme.of(ctx).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20)),
+            title: const Text('📶 WiFi',
+                style: TextStyle(fontWeight: FontWeight.w900)),
+            content: const Text(
+              'Sazlamalar → \n\n'
+              'Baglanandan soň  "WiFi Bağlandym ✓" düwmesine basyň.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Ok'),
+              ),
+            ],
+          ),
+        );
+      }
     });
-
-    try {
-      final networks = await widget.wifiManager.scanNetworks();
-      setState(() {
-        _availableNetworks = networks;
-        _isScanning = false;
-      });
-
-      if (networks.length == 1) {
-        _connectToHotspot(networks.first);
-      }
-    } catch (e) {
-      setState(() {
-        _isScanning = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tarama hatası: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
-  Future<void> _connectToHotspot(String ssid) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
+  void _confirmWifi() {
+    setState(() {
+      _wifiConfirmed = true;
+      _step = 1;
+    });
+  }
 
-    final connected = await widget.wifiManager.connectToNetwork(ssid);
-
-    if (mounted) Navigator.pop(context);
-
-    if (connected) {
-      setState(() {
-        _isConnected = true;
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Bağlandı: $ssid'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Bağlantı başarısız!'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+  String _getServerUrl() {
+    final host = _targetHost ?? '192.168.43.1';
+    return 'http://$host:$_targetPort';
   }
 
   Future<void> _checkFile(String code) async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (code.trim().isEmpty) return;
+    setState(() => _isLoading = true);
 
     try {
-      final serverUrl = 'http://192.168.43.1:8080';
-      final response = await http.get(
-        Uri.parse('$serverUrl/api/file/$code'),
-      );
+      final url = '${_getServerUrl()}/api/file/${code.trim().toUpperCase()}';
+      final res = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 8));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
         setState(() {
           _filename = data['filename'];
           _fileSize = data['size'];
           _downloads = data['downloads'];
           _maxDownloads = data['maxDownloads'];
           _requiresPassword = data['requiresPassword'] ?? false;
-          
           if (data['expiryTime'] != null) {
             _expiryTime = DateTime.parse(data['expiryTime']);
           }
-          
           _isLoading = false;
+          _step = 2;
         });
       } else {
-        final error = jsonDecode(response.body);
-        throw Exception(error['error'] ?? 'File not found');
+        final err = jsonDecode(res.body);
+        throw Exception(err['error'] ?? 'Hata');
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Hata: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      setState(() => _isLoading = false);
+      _showErr(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
-  Future<void> _downloadFile(String code) async {
-    final status = await Permission.storage.request();
+  Future<void> _downloadFile() async {
+    final code = _codeCtrl.text.trim().toUpperCase();
+
+    // Depolama izni
+    var status = await Permission.storage.status;
     if (!status.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Depolama izni gerekli!'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
+      status = await Permission.storage.request();
+      if (!status.isGranted) {
+        _showErr('Saklamak üçin rugsat gerek!');
+        return;
+      }
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isDownloading = true);
 
     try {
-      final serverUrl = 'http://192.168.43.1:8080';
-      final response = await http.post(
-        Uri.parse('$serverUrl/api/download/$code'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'password': _passwordController.text.isEmpty 
-              ? null 
-              : _passwordController.text,
-        }),
-      );
+      final url = '${_getServerUrl()}/api/download/$code';
+      final res = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'password':
+                  _pwCtrl.text.isEmpty ? null : _pwCtrl.text,
+            }),
+          )
+          .timeout(const Duration(minutes: 10));
 
-      if (response.statusCode == 200) {
-        final directory = await getExternalStorageDirectory();
-        final downloadsDir = Directory('${directory!.path}/Downloads');
-        
-        if (!await downloadsDir.exists()) {
-          await downloadsDir.create(recursive: true);
+      if (res.statusCode == 200) {
+        // Kaydet
+        Directory? dir;
+        try {
+          dir = await getExternalStorageDirectory();
+        } catch (_) {
+          dir = await getApplicationDocumentsDirectory();
         }
+        final folder = Directory('${dir!.path}/SecureShare');
+        if (!await folder.exists()) await folder.create(recursive: true);
 
-        final filePath = '${downloadsDir.path}/$_filename';
-        final file = File(filePath);
-        await file.writeAsBytes(response.bodyBytes);
+        final filePath = '${folder.path}/$_filename';
+        await File(filePath).writeAsBytes(res.bodyBytes);
 
         setState(() {
-          _isLoading = false;
+          _isDownloading = false;
+          _downloadDone = true;
         });
 
-        if (mounted) {
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              backgroundColor: const Color(0xFF1e293b),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 32),
-                  SizedBox(width: 12),
-                  Text('Başarılı!', style: TextStyle(color: Colors.white)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Dosya indirildi!',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Konum: $filePath',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Tamam'),
-                ),
-              ],
-            ),
-          );
-        }
+        _showSuccess(filePath);
       } else {
-        final error = jsonDecode(response.body);
-        throw Exception(error['error'] ?? 'Download failed');
+        final err = jsonDecode(res.body);
+        throw Exception(err['error'] ?? 'Ýükleme näsazlygy');
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Hata: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      setState(() => _isDownloading = false);
+      _showErr(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = 0;
-    double size = bytes.toDouble();
-    while (size >= 1024 && i < suffixes.length - 1) {
-      size /= 1024;
-      i++;
-    }
-    return '${size.toStringAsFixed(2)} ${suffixes[i]}';
-  }
-
-  String _formatDateTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = dateTime.difference(now);
-    
-    if (difference.isNegative) {
-      return 'Süresi dolmuş';
-    }
-    
-    if (difference.inDays > 0) {
-      return '${difference.inDays} gün ${difference.inHours % 24} saat kaldı';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} saat ${difference.inMinutes % 60} dakika kaldı';
-    } else {
-      return '${difference.inMinutes} dakika kaldı';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showScanner) {
-      return _buildScanner();
-    }
-
-    if (_filename != null) {
-      return _buildFilePreview();
-    }
-
-    return _buildCodeInput();
-  }
-
-  Widget _buildCodeInput() {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dosya Al'),
-        backgroundColor: const Color(0xFF10b981),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _scanForNetworks,
-          ),
-        ],
-      ),
-      backgroundColor: const Color(0xFF0f172a),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            if (_availableNetworks.isNotEmpty && !_isConnected) ...[
-              const Text(
-                'Bulunan SecureShare Ağları:',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...(_availableNetworks.map((network) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  tileColor: Colors.white.withOpacity(0.05),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  leading: const Icon(Icons.wifi, color: Color(0xFF10b981)),
-                  title: Text(
-                    network,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  trailing: ElevatedButton(
-                    onPressed: () => _connectToHotspot(network),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10b981),
-                    ),
-                    child: const Text('Bağlan'),
-                  ),
-                ),
-              ))),
-              const SizedBox(height: 24),
-              const Divider(color: Colors.white24),
-              const SizedBox(height: 24),
-            ],
-
-            if (_isScanning)
-              const Column(
-                children: [
-                  CircularProgressIndicator(color: Color(0xFF10b981)),
-                  SizedBox(height: 16),
-                  Text(
-                    'WiFi ağları taranıyor...',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ],
-              ),
-
-            if (!_isScanning && _availableNetworks.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.orange),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'SecureShare ağı bulunamadı. Gönderen kişinin "GÖNDER" butonuna bastığından emin olun.',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            if (_isConnected)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.check_circle, color: Colors.green),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Bağlantı başarılı! Şimdi kodu girin.',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            const SizedBox(height: 40),
-
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF10b981), Color(0xFF059669)],
-                ),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: const Icon(Icons.download, size: 60, color: Colors.white),
-            ),
-            
-            const SizedBox(height: 32),
-            
-            const Text(
-              'Paylaşım Kodu Girin',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            
-            const SizedBox(height: 24),
-            
-            TextField(
-              controller: _codeController,
-              textAlign: TextAlign.center,
-              textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(
-                fontSize: 24,
-                letterSpacing: 8,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-              decoration: InputDecoration(
-                hintText: 'XXXXXX',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0xFF10b981), width: 2),
-                ),
-              ),
-              onSubmitted: (value) {
-                if (value.isNotEmpty) {
-                  _checkFile(value.toUpperCase());
-                }
-              },
-            ),
-            
-            const SizedBox(height: 24),
-            
-            SizedBox(
-              width: double.infinity,
-              height: 60,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        if (_codeController.text.isNotEmpty) {
-                          _checkFile(_codeController.text.toUpperCase());
-                        }
-                      },
-                icon: _isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Icon(Icons.search, size: 28),
-                label: Text(
-                  _isLoading ? 'Kontrol ediliyor...' : 'Dosyayı Bul',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10b981),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  disabledBackgroundColor: Colors.grey,
-                ),
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            const Text(
-              'veya',
-              style: TextStyle(color: Colors.white60, fontSize: 16),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            OutlinedButton.icon(
-              onPressed: () async {
-                final status = await Permission.camera.request();
-                if (status.isGranted) {
-                  setState(() {
-                    _showScanner = true;
-                  });
-                } else {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Kamera izni gerekli!'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-              icon: const Icon(Icons.qr_code_scanner, size: 28),
-              label: const Text(
-                'QR Kod Tara',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF10b981),
-                side: const BorderSide(color: Color(0xFF10b981), width: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-            ),
-          ],
-        ),
+  void _showErr(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 
-  Widget _buildScanner() {
+  void _showSuccess(String path) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final st = context.read<AppState>();
+        return AlertDialog(
+          backgroundColor: st.isDarkMode
+              ? const Color(0xFF1E1E35)
+              : Colors.white,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFF06D6A0), Color(0xFF059669)]),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(Icons.check_rounded,
+                    color: Colors.white, size: 40),
+              ),
+              const SizedBox(height: 20),
+              Text(st.t('downloaded'),
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              Text(path,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  textAlign: TextAlign.center),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context);
+              },
+              child: Text(st.t('back'),
+                  style: const TextStyle(color: Color(0xFF06D6A0))),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _fmtSize(int b) {
+    if (b <= 0) return '0 B';
+    const s = ['B', 'KB', 'MB', 'GB'];
+    var i = 0;
+    double v = b.toDouble();
+    while (v >= 1024 && i < s.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return '${v.toStringAsFixed(2)} ${s[i]}';
+  }
+
+  String _timeLeft() {
+    if (_expiryTime == null) return '';
+    final d = _expiryTime!.difference(DateTime.now());
+    if (d.isNegative) return 'Süresi doldu';
+    if (d.inDays > 0) return '${d.inDays}g ${d.inHours % 24}s';
+    if (d.inHours > 0) return '${d.inHours}s ${d.inMinutes % 60}dk';
+    return '${d.inMinutes}dk';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = context.watch<AppState>();
+    final dark = st.isDarkMode;
+    final bg = dark ? const Color(0xFF0D0D1A) : const Color(0xFFF0F0FF);
+    final card = dark ? const Color(0xFF1E1E35) : Colors.white;
+    final txt = dark ? Colors.white : const Color(0xFF1A1A2E);
+    final sub = dark ? Colors.white54 : Colors.black45;
+    final fill =
+        dark ? const Color(0xFF151528) : const Color(0xFFF5F5FF);
+
+    if (_showScanner) return _buildScanner(st, txt);
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: bg,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: txt),
+          onPressed: () {
+            if (_step > 0) {
+              setState(() => _step--);
+            } else {
+              Navigator.pop(context);
+            }
+          },
+        ),
+        title: Text(st.t('receiveTitle'),
+            style: TextStyle(
+                color: txt, fontWeight: FontWeight.w900)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(4),
+          child: Row(
+            children: List.generate(
+              3,
+              (i) => Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  height: 3,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: i <= _step
+                        ? const Color(0xFF06D6A0)
+                        : Colors.grey.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: _step == 0
+          ? _buildStep0(st, bg, card, txt, sub)
+          : _step == 1
+              ? _buildStep1(st, bg, card, txt, sub, fill)
+              : _buildStep2(st, bg, card, txt, sub, fill),
+    );
+  }
+
+  // ── ADIM 0: WiFi Bağlan ──────────────────────────────────
+  Widget _buildStep0(
+      AppState st, Color bg, Color card, Color txt, Color sub) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          const SizedBox(height: 30),
+
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF06D6A0), Color(0xFF059669)]),
+              borderRadius: BorderRadius.circular(32),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF06D6A0).withOpacity(0.4),
+                  blurRadius: 30,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child:
+                const Icon(Icons.wifi_rounded, color: Colors.white, size: 52),
+          ),
+
+          const SizedBox(height: 32),
+
+          Text(
+            st.t('receiveStep1'),
+            style: TextStyle(
+                color: txt, fontSize: 22, fontWeight: FontWeight.w900),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 12),
+
+          Text(
+            st.t('receiveStep1desc'),
+            style: TextStyle(color: sub, fontSize: 14, height: 1.6),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 40),
+
+          // WiFi Ayarları Aç
+          _gradBtn(
+            label: st.t('openWifiSettings'),
+            icon: Icons.settings_rounded,
+            colors: const [Color(0xFF06D6A0), Color(0xFF059669)],
+            glow: const Color(0xFF06D6A0),
+            onTap: _openWifiSettings,
+          ),
+
+          const SizedBox(height: 16),
+
+          // Bağlandım butonu
+          GestureDetector(
+            onTap: _confirmWifi,
+            child: Container(
+              width: double.infinity,
+              height: 56,
+              decoration: BoxDecoration(
+                border: Border.all(
+                    color: const Color(0xFF6C63FF).withOpacity(0.6),
+                    width: 1.5),
+                borderRadius: BorderRadius.circular(16),
+                color: const Color(0xFF6C63FF).withOpacity(0.08),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.check_circle_outline_rounded,
+                      color: Color(0xFF6C63FF), size: 22),
+                  const SizedBox(width: 10),
+                  Text(
+                    st.t('wifiConnected'),
+                    style: const TextStyle(
+                      color: Color(0xFF6C63FF),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const Spacer(),
+
+          // İpucu
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF06D6A0).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                  color: const Color(0xFF06D6A0).withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.tips_and_updates_rounded,
+                    color: Color(0xFF06D6A0), size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    st.t('tipText'),
+                    style: TextStyle(
+                        color: sub, fontSize: 12, height: 1.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── ADIM 1: Kod Gir / QR Tara ───────────────────────────
+  Widget _buildStep1(AppState st, Color bg, Color card, Color txt, Color sub,
+      Color fill) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+
+          // WiFi bağlı bilgisi
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF06D6A0).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: const Color(0xFF06D6A0).withOpacity(0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.wifi_rounded,
+                    color: Color(0xFF06D6A0), size: 18),
+                const SizedBox(width: 10),
+                Text(st.t('wifiConnected'),
+                    style: const TextStyle(
+                        color: Color(0xFF06D6A0),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13)),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          Text(st.t('receiveStep2'),
+              style: TextStyle(
+                  color: txt, fontSize: 18, fontWeight: FontWeight.w900)),
+
+          const SizedBox(height: 20),
+
+          // Kod girişi kartı
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: card,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.05), blurRadius: 12)
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(st.t('enterCode'),
+                    style: TextStyle(
+                        color: sub,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _codeCtrl,
+                  textAlign: TextAlign.center,
+                  textCapitalization: TextCapitalization.characters,
+                  style: TextStyle(
+                    color: txt,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 10,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'XXXXXX',
+                    hintStyle:
+                        TextStyle(color: sub, fontSize: 26, letterSpacing: 8),
+                    filled: true,
+                    fillColor: fill,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(
+                          color: Color(0xFF06D6A0), width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Dosya Bul butonu
+          _gradBtn(
+            label: _isLoading ? '...' : st.t('findFile'),
+            icon: Icons.search_rounded,
+            colors: const [Color(0xFF06D6A0), Color(0xFF059669)],
+            glow: const Color(0xFF06D6A0),
+            onTap: _isLoading
+                ? null
+                : () => _checkFile(_codeCtrl.text),
+            loading: _isLoading,
+          ),
+
+          const SizedBox(height: 16),
+
+          // VEYA
+          Row(
+            children: [
+              Expanded(
+                  child: Divider(color: sub.withOpacity(0.3))),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16),
+                child: Text('ýa-da',
+                    style: TextStyle(color: sub, fontSize: 12)),
+              ),
+              Expanded(
+                  child: Divider(color: sub.withOpacity(0.3))),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // QR Tara
+          GestureDetector(
+            onTap: () async {
+              final status = await Permission.camera.request();
+              if (status.isGranted) {
+                setState(() => _showScanner = true);
+              } else {
+                _showErr('Kamera izni gerekli!');
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF6C63FF), Color(0xFF4F46E5)]),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF6C63FF).withOpacity(0.35),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.qr_code_scanner_rounded,
+                      color: Colors.white, size: 24),
+                  const SizedBox(width: 10),
+                  Text(st.t('scanQR'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      )),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── ADIM 2: Dosya Bilgisi & İndir ───────────────────────
+  Widget _buildStep2(AppState st, Color bg, Color card, Color txt, Color sub,
+      Color fill) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+
+          // Dosya ikonu
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF06D6A0), Color(0xFF059669)]),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF06D6A0).withOpacity(0.4),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.insert_drive_file_rounded,
+                color: Colors.white, size: 48),
+          ),
+
+          const SizedBox(height: 20),
+
+          Text(
+            _filename ?? '',
+            style: TextStyle(
+                color: txt, fontSize: 22, fontWeight: FontWeight.w900),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 8),
+
+          if (_fileSize != null)
+            Text(_fmtSize(_fileSize!),
+                style: TextStyle(color: sub, fontSize: 15)),
+
+          const SizedBox(height: 24),
+
+          // Bilgi kartı
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: card,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.05), blurRadius: 12)
+              ],
+            ),
+            child: Column(
+              children: [
+                if (_downloads != null)
+                  _infoTile(
+                    Icons.download_rounded,
+                    st.t('downloads'),
+                    '$_downloads${_maxDownloads != null ? " / $_maxDownloads" : ""}',
+                    const Color(0xFF6C63FF),
+                    txt,
+                    sub,
+                  ),
+                if (_expiryTime != null) ...[
+                  const SizedBox(height: 14),
+                  _infoTile(
+                    Icons.timer_rounded,
+                    st.t('timeLeft'),
+                    _timeLeft(),
+                    const Color(0xFFF59E0B),
+                    txt,
+                    sub,
+                  ),
+                ],
+                if (_requiresPassword) ...[
+                  const SizedBox(height: 14),
+                  _infoTile(
+                    Icons.lock_rounded,
+                    st.t('fileProtected'),
+                    '🔒',
+                    const Color(0xFFEF4444),
+                    txt,
+                    sub,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Parola girişi
+          if (_requiresPassword) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: card,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: TextField(
+                controller: _pwCtrl,
+                obscureText: true,
+                style: TextStyle(color: txt, fontSize: 15),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.lock_outline_rounded,
+                      color: Color(0xFFEF4444), size: 20),
+                  labelText: st.t('enterPassword'),
+                  labelStyle: TextStyle(color: sub),
+                  filled: true,
+                  fillColor: fill,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                        color: Color(0xFFEF4444), width: 1.5),
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          // İndirme animasyonu
+          if (_isDownloading) ...[
+            const SizedBox(height: 20),
+            const LinearProgressIndicator(
+              backgroundColor: Color(0x2206D6A0),
+              color: Color(0xFF06D6A0),
+            ),
+            const SizedBox(height: 10),
+            Text(st.t('downloading'),
+                style: TextStyle(
+                    color: sub, fontSize: 13, fontWeight: FontWeight.w600)),
+          ],
+
+          const SizedBox(height: 24),
+
+          // İndir butonu
+          _gradBtn(
+            label: _downloadDone
+                ? st.t('downloaded')
+                : (_isDownloading ? st.t('downloading') : st.t('download')),
+            icon: _downloadDone
+                ? Icons.check_circle_rounded
+                : Icons.download_rounded,
+            colors: _downloadDone
+                ? [const Color(0xFF06D6A0), const Color(0xFF059669)]
+                : [const Color(0xFF6C63FF), const Color(0xFF4F46E5)],
+            glow: _downloadDone
+                ? const Color(0xFF06D6A0)
+                : const Color(0xFF6C63FF),
+            onTap: (_isDownloading || _downloadDone) ? null : _downloadFile,
+            loading: _isDownloading,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── QR SCANNER ───────────────────────────────────────────
+  Widget _buildScanner(AppState st, Color txt) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR Kod Tara'),
-        backgroundColor: const Color(0xFF10b981),
+        title: Text(st.t('scanQR'),
+            style:
+                TextStyle(color: txt, fontWeight: FontWeight.w900)),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            setState(() {
-              _showScanner = false;
-            });
-          },
+          icon: Icon(Icons.close_rounded, color: txt),
+          onPressed: () => setState(() => _showScanner = false),
         ),
       ),
       body: MobileScanner(
         onDetect: (capture) {
-          final List<Barcode> barcodes = capture.barcodes;
-          for (final barcode in barcodes) {
+          for (final barcode in capture.barcodes) {
             if (barcode.rawValue != null) {
-              final url = barcode.rawValue!;
-              final code = url.split('/').last;
-              
-              setState(() {
-                _showScanner = false;
-                _codeController.text = code;
-              });
-              
-              _checkFile(code);
+              final raw = barcode.rawValue!;
+              setState(() => _showScanner = false);
+
+              try {
+                // URL formatı: http://IP:PORT/d/CODE
+                final uri = Uri.parse(raw);
+                _targetHost = uri.host;
+                _targetPort = uri.port != 0 ? uri.port : 8080;
+                final code = uri.pathSegments.last;
+                _codeCtrl.text = code;
+
+                // Bağlı değilse adım 1'e, bağlıysa direkt dosyayı kontrol et
+                if (!_wifiConfirmed) {
+                  setState(() {
+                    _wifiConfirmed = true;
+                    _step = 1;
+                  });
+                }
+                _checkFile(code);
+              } catch (e) {
+                // Sadece kod ise
+                _codeCtrl.text = raw;
+                setState(() => _step = 1);
+              }
               break;
             }
           }
@@ -602,188 +834,82 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
-  Widget _buildFilePreview() {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dosya Bilgileri'),
-        backgroundColor: const Color(0xFF10b981),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            setState(() {
-              _filename = null;
-              _fileSize = null;
-              _requiresPassword = false;
-              _passwordController.clear();
-            });
-          },
+  Widget _infoTile(IconData icon, String label, String value, Color color,
+      Color txt, Color sub) {
+    return Row(
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: color, size: 20),
         ),
-      ),
-      backgroundColor: const Color(0xFF0f172a),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
+        const SizedBox(width: 14),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 20),
-            
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF10b981), Color(0xFF059669)],
-                ),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: const Icon(Icons.insert_drive_file, size: 60, color: Colors.white),
-            ),
-            
-            const SizedBox(height: 24),
-            
-            Text(
-              _filename ?? '',
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            
-            const SizedBox(height: 12),
-            
-            if (_fileSize != null)
-              Text(
-                _formatFileSize(_fileSize!),
-                style: const TextStyle(
-                  fontSize: 18,
-                  color: Colors.white60,
-                ),
-              ),
-            
-            const SizedBox(height: 32),
-            
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: Column(
-                children: [
-                  if (_downloads != null)
-                    _buildInfoRow(
-                      Icons.download,
-                      'İndirme: $_downloads${_maxDownloads != null ? " / $_maxDownloads" : ""}',
-                      Colors.blue,
-                    ),
-                  if (_expiryTime != null) ...[
-                    const SizedBox(height: 12),
-                    _buildInfoRow(
-                      Icons.timer,
-                      _formatDateTime(_expiryTime!),
-                      _expiryTime!.isBefore(DateTime.now())
-                          ? Colors.red
-                          : Colors.orange,
-                    ),
-                  ],
-                  if (_requiresPassword) ...[
-                    const SizedBox(height: 12),
-                    _buildInfoRow(
-                      Icons.lock,
-                      'Parola korumalı',
-                      Colors.red,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 32),
-            
-            if (_requiresPassword)
-              Column(
-                children: [
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Parola',
-                      labelStyle: const TextStyle(color: Colors.white70),
-                      prefixIcon: const Icon(Icons.lock, color: Color(0xFF10b981)),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: const BorderSide(color: Color(0xFF10b981), width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            
-            SizedBox(
-              width: double.infinity,
-              height: 60,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        _downloadFile(_codeController.text.toUpperCase());
-                      },
-                icon: _isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Icon(Icons.download, size: 28),
-                label: Text(
-                  _isLoading ? 'İndiriliyor...' : 'Dosyayı İndir',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10b981),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  disabledBackgroundColor: Colors.grey,
-                ),
-              ),
-            ),
+            Text(label,
+                style: TextStyle(
+                    color: sub, fontSize: 11, fontWeight: FontWeight.w600)),
+            Text(value,
+                style: TextStyle(
+                    color: txt, fontSize: 15, fontWeight: FontWeight.w700)),
           ],
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String text, Color color) {
-    return Row(
-      children: [
-        Icon(icon, size: 24, color: color),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
-          ),
+  Widget _gradBtn({
+    required String label,
+    required IconData icon,
+    required List<Color> colors,
+    required Color glow,
+    required VoidCallback? onTap,
+    bool loading = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 58,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: colors),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: glow.withOpacity(0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-      ],
+        child: Center(
+          child: loading
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2.5),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, color: Colors.white, size: 22),
+                    const SizedBox(width: 10),
+                    Text(label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        )),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 }

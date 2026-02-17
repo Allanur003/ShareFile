@@ -12,7 +12,7 @@ class WiFiManager {
   Future<String?> startHotspot() async {
     try {
       if (!await _requestPermissions()) {
-        throw Exception('Gerekli izinler verilmedi');
+        throw Exception('Gerekli rugsatlar berilmedi');
       }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(8);
@@ -25,7 +25,7 @@ class WiFiManager {
           await WiFiForIoTPlugin.setWiFiAPSSID(_hotspotName!);
           await WiFiForIoTPlugin.setWiFiAPPreSharedKey(hotspotPassword);
           
-          print('✅ Hotspot açıldı: $_hotspotName');
+          print('✅ Hotspot açyldy: $_hotspotName');
           return _hotspotName;
         }
       }
@@ -41,18 +41,18 @@ class WiFiManager {
     try {
       if (Platform.isAndroid) {
         await WiFiForIoTPlugin.setWiFiAPEnabled(false);
-        print('⛔ Hotspot kapatıldı');
+        print('⛔ Hotspot ýapyldy');
       }
       _hotspotName = null;
     } catch (e) {
-      print('❌ Hotspot kapatma hatası: $e');
+      print('❌ Hotspot ýapma ýalňyşlygy: $e');
     }
   }
 
   Future<List<String>> scanNetworks() async {
     try {
       if (!await _requestPermissions()) {
-        throw Exception('Gerekli izinler verilmedi');
+        throw Exception('Gerekli rugsatlar berilmedi');
       }
 
       final networks = await WiFiForIoTPlugin.loadWifiList();
@@ -65,7 +65,7 @@ class WiFiManager {
       print('📡 Bulunan SecureShare ağları: $secureShareNetworks');
       return secureShareNetworks;
     } catch (e) {
-      print('❌ WiFi tarama hatası: $e');
+      print('❌ WiFi gozleme nasazlygy: $e');
       return [];
     }
   }
@@ -87,13 +87,13 @@ class WiFiManager {
       if (connected) {
         await Future.delayed(const Duration(seconds: 2));
         final ip = await getConnectedIP();
-        print('✅ Bağlandı! IP: $ip');
+        print('✅ Bağlandy! IP: $ip');
         return true;
       }
 
       return false;
     } catch (e) {
-      print('❌ Bağlantı hatası: $e');
+      print('❌ Bağlanma nasazlygy: $e');
       return false;
     }
   }
@@ -122,7 +122,7 @@ class WiFiManager {
     for (var permission in permissions) {
       final status = await permission.request();
       if (!status.isGranted) {
-        print('❌ İzin reddedildi: $permission');
+        print('❌ Rugsat ýatyryldy: $permission');
         return false;
       }
     }

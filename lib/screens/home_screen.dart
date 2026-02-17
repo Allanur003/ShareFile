@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/app_state.dart';
 import '../services/file_server.dart';
-import '../services/wifi_manager.dart';
 import 'send_screen.dart';
 import 'receive_screen.dart';
 
@@ -11,265 +12,545 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final FileServer _fileServer = FileServer();
-  final WiFiManager _wifiManager = WiFiManager();
-  
   bool _serverStarted = false;
-  String? _serverUrl;
-  String _statusText = 'Bekleniyor...';
+  String? _serverIP;
+  bool _menuOpen = false;
+  late AnimationController _anim;
+  late Animation<double> _animVal;
 
   @override
   void initState() {
     super.initState();
-    _initServer();
+    _anim = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 280));
+    _animVal = CurvedAnimation(parent: _anim, curve: Curves.easeInOut);
+    _startServer();
   }
 
-  Future<void> _initServer() async {
-    final url = await _fileServer.startServer(isHotspotMode: false);
-    setState(() {
-      _serverUrl = url;
-      _serverStarted = url != null;
-      _statusText = _serverStarted ? 'Hazır' : 'Başlatılamadı';
-    });
+  Future<void> _startServer() async {
+    final ip = await _fileServer.startServer();
+    if (mounted) {
+      setState(() {
+        _serverIP = ip;
+        _serverStarted = ip != null;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _anim.dispose();
     _fileServer.stopServer();
-    _wifiManager.stopHotspot();
     super.dispose();
+  }
+
+  void _toggleMenu() {
+    setState(() => _menuOpen = !_menuOpen);
+    _menuOpen ? _anim.forward() : _anim.reverse();
   }
 
   @override
   Widget build(BuildContext context) {
+    final st = context.watch<AppState>();
+    final dark = st.isDarkMode;
+    final bg = dark ? const Color(0xFF0D0D1A) : const Color(0xFFF0F0FF);
+    final card = dark ? const Color(0xFF1E1E35) : Colors.white;
+    final txt = dark ? Colors.white : const Color(0xFF1A1A2E);
+    final sub = dark ? Colors.white54 : Colors.black45;
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0f172a),
-              Color(0xFF1e293b),
-              Color(0xFF334155),
-            ],
+      backgroundColor: bg,
+      body: Stack(
+        children: [
+          // Arka plan dekorasyon
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF6C63FF).withOpacity(0.06),
+              ),
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF6366f1), Color(0xFF8b5cf6)],
+          Positioned(
+            bottom: -80,
+            left: -80,
+            child: Container(
+              width: 240,
+              height: 240,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF06D6A0).withOpacity(0.06),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Column(
+              children: [
+                // ── Üst bar ──────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
+                  child: Row(
+                    children: [
+                      // Logo
+                      Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF6C63FF), Color(0xFF06D6A0)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF6C63FF).withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
-                        borderRadius: BorderRadius.circular(30),
+                        child: const Icon(Icons.shield_rounded,
+                            color: Colors.white, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('SecureShare',
+                              style: TextStyle(
+                                  color: txt,
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w900)),
+                          Text(st.t('tagline'),
+                              style:
+                                  TextStyle(color: sub, fontSize: 11)),
+                        ],
+                      ),
+                      const Spacer(),
+                      // Ayarlar butonu
+                      GestureDetector(
+                        onTap: _toggleMenu,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: _menuOpen
+                                ? const Color(0xFF6C63FF)
+                                : card,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.08),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            _menuOpen
+                                ? Icons.close_rounded
+                                : Icons.tune_rounded,
+                            color: _menuOpen ? Colors.white : sub,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Açılır Ayarlar Menüsü ──────────────
+                SizeTransition(
+                  sizeFactor: _animVal,
+                  child: _buildMenu(st, card, txt, sub),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Durum Çubuğu ──────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: GestureDetector(
+                    onTap: _startServer,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: card,
+                        borderRadius: BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF6366f1).withOpacity(0.5),
-                            blurRadius: 20,
-                            spreadRadius: 5,
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
                           ),
                         ],
-                      ),
-                      child: const Icon(Icons.lock, size: 50, color: Colors.white),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'SecureShare',
-                      style: TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _serverStarted ? Colors.green : Colors.red,
-                        borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            _serverStarted ? Icons.wifi : Icons.wifi_off,
-                            color: Colors.white,
-                            size: 16,
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _serverStarted
+                                  ? const Color(0xFF06D6A0)
+                                  : const Color(0xFFEF4444),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (_serverStarted
+                                          ? const Color(0xFF06D6A0)
+                                          : const Color(0xFFEF4444))
+                                      .withOpacity(0.5),
+                                  blurRadius: 6,
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           Text(
-                            _statusText,
-                            style: const TextStyle(color: Colors.white),
+                            _serverStarted
+                                ? st.t('online')
+                                : st.t('connecting'),
+                            style: TextStyle(
+                              color: _serverStarted
+                                  ? const Color(0xFF06D6A0)
+                                  : const Color(0xFFEF4444),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
                           ),
+                          if (_serverIP != null) ...[
+                            const SizedBox(width: 8),
+                            Text('·', style: TextStyle(color: sub)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '$_serverIP:${_fileServer.port}',
+                                style: TextStyle(
+                                    color: sub,
+                                    fontSize: 12,
+                                    fontFamily: 'monospace'),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                          Icon(Icons.refresh_rounded, color: sub, size: 16),
                         ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
 
-              const Spacer(),
+                const Spacer(),
 
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Column(
-                  children: [
-                    _buildMainButton(
-                      context: context,
-                      icon: Icons.send,
-                      label: 'GÖNDER',
-                      subtitle: 'Dosya paylaş (Hotspot açılır)',
-                      color: const Color(0xFF6366f1),
-                      onTap: () async {
-                        showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (context) => const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-
-                        final hotspotName = await _wifiManager.startHotspot();
-                        
-                        if (hotspotName != null) {
-                          await _fileServer.stopServer();
-                          await _fileServer.startServer(isHotspotMode: true);
-                          
-                          setState(() {
-                            _statusText = 'Hotspot: $hotspotName';
-                          });
-
-                          if (mounted) Navigator.pop(context);
-
-                          if (mounted) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => SendScreen(
-                                  fileServer: _fileServer,
-                                  wifiManager: _wifiManager,
-                                ),
-                              ),
-                            ).then((_) {
-                              _wifiManager.stopHotspot();
-                              _fileServer.stopServer();
-                              _initServer();
-                            });
-                          }
-                        } else {
-                          if (mounted) Navigator.pop(context);
-                          if (mounted) {
+                // ── Ana Butonlar ───────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      _mainBtn(
+                        label: st.t('send'),
+                        sub: st.t('sendSub'),
+                        icon: Icons.upload_rounded,
+                        colors: const [Color(0xFF6C63FF), Color(0xFF4F46E5)],
+                        glow: const Color(0xFF6C63FF),
+                        onTap: () {
+                          if (!_serverStarted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Hotspot açılamadı! İzinleri kontrol edin.'),
-                                backgroundColor: Colors.red,
+                              SnackBar(
+                                content: Text(st.t('connecting')),
+                                backgroundColor: const Color(0xFFEF4444),
                               ),
                             );
+                            return;
                           }
-                        }
-                      },
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    _buildMainButton(
-                      context: context,
-                      icon: Icons.download,
-                      label: 'AL',
-                      subtitle: 'Dosya indir (WiFi tarar)',
-                      color: const Color(0xFF10b981),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ReceiveScreen(
-                              fileServer: _fileServer,
-                              wifiManager: _wifiManager,
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  SendScreen(fileServer: _fileServer),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              const Spacer(),
-
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Text(
-                  _serverUrl ?? 'Server başlatılıyor...',
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
+                          ).then((_) {
+                            // Geri dönünce IP yenile
+                            _fileServer.refreshIP().then((_) {
+                              if (mounted) {
+                                setState(() {
+                                  _serverIP = _fileServer.serverIP;
+                                });
+                              }
+                            });
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      _mainBtn(
+                        label: st.t('receive'),
+                        sub: st.t('receiveSub'),
+                        icon: Icons.download_rounded,
+                        colors: const [Color(0xFF06D6A0), Color(0xFF059669)],
+                        glow: const Color(0xFF06D6A0),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ReceiveScreen(fileServer: _fileServer),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                  textAlign: TextAlign.center,
+                ),
+
+                const Spacer(),
+
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: Text(
+                    '🔒 SecureShare',
+                    style: TextStyle(color: sub, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenu(AppState st, Color card, Color txt, Color sub) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: card,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)
+        ],
+      ),
+      child: Column(
+        children: [
+          // Tema
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C63FF).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  st.isDarkMode
+                      ? Icons.dark_mode_rounded
+                      : Icons.light_mode_rounded,
+                  color: const Color(0xFF6C63FF),
+                  size: 18,
                 ),
               ),
+              const SizedBox(width: 12),
+              Text(st.isDarkMode ? st.t('dark') : st.t('light'),
+                  style: TextStyle(
+                      color: txt,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14)),
+              const Spacer(),
+              _toggle(st.isDarkMode, () => st.toggleTheme()),
             ],
+          ),
+          const SizedBox(height: 16),
+          Divider(color: sub.withOpacity(0.15), height: 1),
+          const SizedBox(height: 16),
+          // Dil
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C63FF).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.language_rounded,
+                    color: Color(0xFF6C63FF), size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(st.t('language'),
+                  style: TextStyle(
+                      color: txt,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14)),
+              const Spacer(),
+              _langBtn(st, 'tk', 'TM'),
+              const SizedBox(width: 8),
+              _langBtn(st, 'en', 'EN'),
+              const SizedBox(width: 8),
+              _langBtn(st, 'ru', 'RU'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toggle(bool value, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        width: 52,
+        height: 28,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color:
+              value ? const Color(0xFF6C63FF) : Colors.grey.shade400,
+        ),
+        child: AnimatedAlign(
+          duration: const Duration(milliseconds: 220),
+          alignment:
+              value ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMainButton({
-    required BuildContext context,
-    required IconData icon,
+  Widget _langBtn(AppState st, String lang, String label) {
+    final active = st.language == lang;
+    return GestureDetector(
+      onTap: () => st.setLanguage(lang),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+        decoration: BoxDecoration(
+          gradient: active
+              ? const LinearGradient(
+                  colors: [Color(0xFF6C63FF), Color(0xFF4F46E5)])
+              : null,
+          color: active ? null : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: active
+                ? Colors.transparent
+                : const Color(0xFF6C63FF).withOpacity(0.35),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : const Color(0xFF6C63FF),
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mainBtn({
     required String label,
-    required String subtitle,
-    required Color color,
+    required String sub,
+    required IconData icon,
+    required List<Color> colors,
+    required Color glow,
     required VoidCallback onTap,
   }) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(24),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(32),
+        height: 130,
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [color, color.withOpacity(0.7)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: colors,
           ),
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: color.withOpacity(0.4),
-              blurRadius: 20,
-              spreadRadius: 2,
+              color: glow.withOpacity(0.38),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
-        child: Column(
+        child: Stack(
           children: [
-            Icon(icon, size: 64, color: Colors.white),
-            const SizedBox(height: 16),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+            Positioned(
+              right: -30,
+              top: -30,
+              child: Container(
+                width: 130,
+                height: 130,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.07),
+                ),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.white.withOpacity(0.8),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 24, vertical: 0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child:
+                        Icon(icon, color: Colors.white, size: 30),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(label,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                            )),
+                        const SizedBox(height: 4),
+                        Text(sub,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.75),
+                              fontSize: 12,
+                            )),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_ios_rounded,
+                      color: Colors.white.withOpacity(0.5), size: 16),
+                ],
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),

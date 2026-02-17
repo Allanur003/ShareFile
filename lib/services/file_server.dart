@@ -11,41 +11,27 @@ class FileServer {
   HttpServer? _server;
   String? _serverIP;
   final int _port = 8080;
-  
   final Map<String, SharedFile> _sharedFiles = {};
-  
-  bool _isHotspotMode = false;
 
-  Future<String?> startServer({bool isHotspotMode = false}) async {
+  Future<String?> startServer() async {
     try {
-      _isHotspotMode = isHotspotMode;
-      
-      if (isHotspotMode) {
-        _serverIP = '192.168.43.1';
-      } else {
-        _serverIP = await _getLocalIP();
-      }
-      
+      _serverIP = await _getLocalIP();
       final router = Router();
-
       router.post('/api/upload', _handleUpload);
       router.get('/api/file/<code>', _getFileInfo);
       router.post('/api/download/<code>', _downloadFile);
 
       final handler = Pipeline()
-          .addMiddleware(logRequests())
           .addMiddleware(_corsHeaders())
           .addHandler(router);
 
       _server = await shelf_io.serve(
-        handler, 
-        InternetAddress.anyIPv4, 
+        handler,
+        InternetAddress.anyIPv4,
         _port,
       );
-      
-      print('🚀 Server: http://$_serverIP:$_port (Hotspot: $isHotspotMode)');
-      return 'http://$_serverIP:$_port';
-      
+      print('🚀 Server: http://$_serverIP:$_port');
+      return _serverIP;
     } catch (e) {
       print('❌ Server error: $e');
       return null;
@@ -56,63 +42,79 @@ class FileServer {
     await _server?.close(force: true);
     _server = null;
     _sharedFiles.clear();
-    print('⛔ Server stopped');
   }
 
   Middleware _corsHeaders() {
     return createMiddleware(
-      requestHandler: (Request request) {
-        if (request.method == 'OPTIONS') {
-          return Response.ok('', headers: _getCorsHeaders());
+      requestHandler: (req) {
+        if (req.method == 'OPTIONS') {
+          return Response.ok('', headers: _cors());
         }
         return null;
       },
-      responseHandler: (Response response) {
-        return response.change(headers: _getCorsHeaders());
-      },
+      responseHandler: (res) => res.change(headers: _cors()),
     );
   }
 
-  Map<String, String> _getCorsHeaders() => {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
+  Map<String, String> _cors() => {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      };
 
   Future<String> _getLocalIP() async {
     try {
       final interfaces = await NetworkInterface.list();
-      for (var interface in interfaces) {
-        for (var addr in interface.addresses) {
-          if (!addr.isLoopback && addr.type == InternetAddressType.IPv4) {
-            if (!addr.address.startsWith('169.254')) {
+      // Önce hotspot IP'sini ara (192.168.43.x veya 192.168.x.x)
+      for (var iface in interfaces) {
+        for (var addr in iface.addresses) {
+          if (!addr.isLoopback &&
+              addr.type == InternetAddressType.IPv4 &&
+              !addr.address.startsWith('169.254')) {
+            // Hotspot IP'si genellikle 192.168.43.1
+            if (addr.address.startsWith('192.168.43')) {
               return addr.address;
             }
+          }
+        }
+      }
+      // Hotspot IP yoksa ilk geçerli IP'yi al
+      for (var iface in interfaces) {
+        for (var addr in iface.addresses) {
+          if (!addr.isLoopback &&
+              addr.type == InternetAddressType.IPv4 &&
+              !addr.address.startsWith('169.254')) {
+            return addr.address;
           }
         }
       }
     } catch (e) {
       print('IP error: $e');
     }
-    return '127.0.0.1';
+    return '192.168.43.1';
+  }
+
+  // Sunucu IP'sini yenile (hotspot açıldıktan sonra çağır)
+  Future<void> refreshIP() async {
+    _serverIP = await _getLocalIP();
+    print('🔄 IP güncellendi: $_serverIP');
   }
 
   Future<Response> _handleUpload(Request request) async {
     try {
       final payload = await request.readAsString();
       final data = jsonDecode(payload);
-      
       final code = const Uuid().v4().substring(0, 6).toUpperCase();
-      
+
       DateTime? expiryTime;
       if (data['expiryMinutes'] != null) {
-        final minutes = int.parse(data['expiryMinutes'].toString());
-        expiryTime = DateTime.now().add(Duration(minutes: minutes));
+        expiryTime = DateTime.now()
+            .add(Duration(minutes: int.parse(data['expiryMinutes'].toString())));
       }
 
-      String? hashedPassword;
+      String? hashedPw;
       if (data['password'] != null && data['password'].toString().isNotEmpty) {
-        hashedPassword = EncryptionService.hashPassword(data['password']);
+        hashedPw = EncryptionService.hashPassword(data['password']);
       }
 
       int? maxDownloads;
@@ -125,153 +127,133 @@ class FileServer {
         filename: data['filename'],
         filePath: data['filePath'],
         size: int.parse(data['size'].toString()),
-        password: hashedPassword,
+        password: hashedPw,
         maxDownloads: maxDownloads,
         expiryTime: expiryTime,
       );
 
-      return Response.ok(jsonEncode({
-        'success': true,
-        'code': code,
-        'url': 'http://$_serverIP:$_port/d/$code'
-      }));
-      
+      return Response.ok(
+        jsonEncode({
+          'success': true,
+          'code': code,
+          'url': 'http://$_serverIP:$_port/d/$code',
+        }),
+        headers: {'Content-Type': 'application/json'},
+      );
     } catch (e) {
       return Response.internalServerError(
-        body: jsonEncode({'error': e.toString()})
-      );
+          body: jsonEncode({'error': e.toString()}));
     }
   }
 
   Response _getFileInfo(Request request, String code) {
     final file = _sharedFiles[code];
-    
     if (file == null) {
       return Response.notFound(
         jsonEncode({'error': 'File not found'}),
         headers: {'Content-Type': 'application/json'},
       );
     }
-
     if (file.isExpired) {
       _sharedFiles.remove(code);
-      return Response(410, 
-        body: jsonEncode({'error': 'File expired'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return Response(410,
+          body: jsonEncode({'error': 'Expired'}),
+          headers: {'Content-Type': 'application/json'});
     }
-
     if (file.hasReachedLimit) {
-      return Response(410, 
-        body: jsonEncode({'error': 'Download limit reached'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return Response(410,
+          body: jsonEncode({'error': 'Limit reached'}),
+          headers: {'Content-Type': 'application/json'});
     }
-
-    return Response.ok(jsonEncode({
-      'filename': file.filename,
-      'size': file.size,
-      'requiresPassword': file.isPasswordProtected,
-      'downloads': file.downloads,
-      'maxDownloads': file.maxDownloads,
-      'expiryTime': file.expiryTime?.toIso8601String(),
-    }), headers: {'Content-Type': 'application/json'});
+    return Response.ok(
+      jsonEncode({
+        'filename': file.filename,
+        'size': file.size,
+        'requiresPassword': file.isPasswordProtected,
+        'downloads': file.downloads,
+        'maxDownloads': file.maxDownloads,
+        'expiryTime': file.expiryTime?.toIso8601String(),
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
   }
 
   Future<Response> _downloadFile(Request request, String code) async {
     final file = _sharedFiles[code];
-    
     if (file == null) {
       return Response.notFound(
         jsonEncode({'error': 'File not found'}),
         headers: {'Content-Type': 'application/json'},
       );
     }
-
     if (file.isExpired) {
       _sharedFiles.remove(code);
       return Response(410,
-        body: jsonEncode({'error': 'File expired'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+          body: jsonEncode({'error': 'Expired'}),
+          headers: {'Content-Type': 'application/json'});
     }
-
     if (file.hasReachedLimit) {
       return Response(410,
-        body: jsonEncode({'error': 'Download limit reached'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+          body: jsonEncode({'error': 'Limit reached'}),
+          headers: {'Content-Type': 'application/json'});
     }
-
     if (file.isPasswordProtected) {
       try {
         final payload = await request.readAsString();
         final data = jsonDecode(payload);
-        final providedPassword = data['password']?.toString() ?? '';
-        
-        if (!EncryptionService.verifyPassword(providedPassword, file.password!)) {
+        final provided = data['password']?.toString() ?? '';
+        if (!EncryptionService.verifyPassword(provided, file.password!)) {
           return Response(403,
-            body: jsonEncode({'error': 'Wrong password'}),
-            headers: {'Content-Type': 'application/json'},
-          );
+              body: jsonEncode({'error': 'Wrong password'}),
+              headers: {'Content-Type': 'application/json'});
         }
-      } catch (e) {
+      } catch (_) {
         return Response(403,
-          body: jsonEncode({'error': 'Password required'}),
-          headers: {'Content-Type': 'application/json'},
-        );
+            body: jsonEncode({'error': 'Password required'}),
+            headers: {'Content-Type': 'application/json'});
       }
     }
-
     try {
-      final fileData = await File(file.filePath).readAsBytes();
-      
+      final bytes = await File(file.filePath).readAsBytes();
       file.downloads++;
-
-      return Response.ok(
-        fileData,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Content-Disposition': 'attachment; filename="${file.filename}"',
-          'Content-Length': fileData.length.toString(),
-        },
-      );
+      return Response.ok(bytes, headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="${file.filename}"',
+        'Content-Length': bytes.length.toString(),
+      });
     } catch (e) {
       return Response.internalServerError(
-        body: jsonEncode({'error': 'Failed to read file: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+          body: jsonEncode({'error': 'Read error: $e'}));
     }
   }
 
-  String? shareFile(File file, {String? password, int? maxDownloads, int? expiryMinutes}) {
+  String? shareFile(File file,
+      {String? password, int? maxDownloads, int? expiryMinutes}) {
     final code = const Uuid().v4().substring(0, 6).toUpperCase();
-    
     DateTime? expiryTime;
     if (expiryMinutes != null) {
       expiryTime = DateTime.now().add(Duration(minutes: expiryMinutes));
     }
-
-    String? hashedPassword;
+    String? hashedPw;
     if (password != null && password.isNotEmpty) {
-      hashedPassword = EncryptionService.hashPassword(password);
+      hashedPw = EncryptionService.hashPassword(password);
     }
-
     _sharedFiles[code] = SharedFile(
       code: code,
       filename: file.path.split('/').last,
       filePath: file.path,
       size: file.lengthSync(),
-      password: hashedPassword,
+      password: hashedPw,
       maxDownloads: maxDownloads,
       expiryTime: expiryTime,
     );
-
     return code;
   }
 
   SharedFile? getFile(String code) => _sharedFiles[code];
-
-  String? get serverUrl => _serverIP != null ? 'http://$_serverIP:$_port' : null;
-  bool get isHotspotMode => _isHotspotMode;
+  String? get serverIP => _serverIP;
+  String? get serverUrl =>
+      _serverIP != null ? 'http://$_serverIP:$_port' : null;
+  int get port => _port;
+  bool get isRunning => _server != null;
 }

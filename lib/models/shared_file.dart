@@ -32,30 +32,4 @@ class SharedFile {
   }
 
   bool get isPasswordProtected => password != null && password!.isNotEmpty;
-
-  Map<String, dynamic> toJson() => {
-    'code': code,
-    'filename': filename,
-    'filePath': filePath,
-    'size': size,
-    'password': password,
-    'maxDownloads': maxDownloads,
-    'expiryTime': expiryTime?.toIso8601String(),
-    'createdAt': createdAt.toIso8601String(),
-    'downloads': downloads,
-  };
-
-  factory SharedFile.fromJson(Map<String, dynamic> json) => SharedFile(
-    code: json['code'],
-    filename: json['filename'],
-    filePath: json['filePath'],
-    size: json['size'],
-    password: json['password'],
-    maxDownloads: json['maxDownloads'],
-    expiryTime: json['expiryTime'] != null 
-        ? DateTime.parse(json['expiryTime']) 
-        : null,
-    createdAt: DateTime.parse(json['createdAt']),
-    downloads: json['downloads'] ?? 0,
-  );
 }
