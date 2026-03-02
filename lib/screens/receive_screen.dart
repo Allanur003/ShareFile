@@ -530,7 +530,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   setState(() {
                     _showScanner = true;
                     _scannerController = MobileScannerController(
-                      detectionSpeed: DetectionSpeed.noPause,
                       facing: CameraFacing.back,
                       torchEnabled: false,
                     );
