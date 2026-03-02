@@ -15,7 +15,7 @@ dependencies:
   shelf_router: ^1.1.4
 
   # Files
-  file_picker: ^6.1.1
+  file_picker: ^8.1.4
   path_provider: ^2.1.1
 
   # QR
