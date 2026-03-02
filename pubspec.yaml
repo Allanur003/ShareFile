@@ -1,7 +1,7 @@
 name: secure_share_files
-description: Secure P2P file sharing application
+description: ShareIt-like secure file sharing
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -10,11 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # HTTP Server
+  # Server
   shelf: ^1.4.1
   shelf_router: ^1.1.4
 
-  # Dosya
+  # Files
   file_picker: ^6.1.1
   path_provider: ^2.1.1
 
@@ -24,11 +24,12 @@ dependencies:
 
   # Network
   network_info_plus: ^5.0.1
+  wifi_iot: ^0.3.18
 
-  # İzin
+  # Permissions
   permission_handler: ^11.1.0
 
-  # HTTP & Crypto & Diğer
+  # Utils
   http: ^1.1.0
   uuid: ^4.2.2
   crypto: ^3.0.3
@@ -36,13 +37,10 @@ dependencies:
   shared_preferences: ^2.2.2
   provider: ^6.1.1
 
-  # WiFi bağlantısı için
-  wifi_iot: ^0.3.18+2
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^2.0.0
 
 flutter:
   uses-material-design: true
