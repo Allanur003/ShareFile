@@ -514,7 +514,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 Expanded(child: Divider(color: sub.withOpacity(0.3))),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('veya', style: TextStyle(color: sub, fontSize: 12)),
+                  child: Text('ýada', style: TextStyle(color: sub, fontSize: 12)),
                 ),
                 Expanded(child: Divider(color: sub.withOpacity(0.3))),
               ],
