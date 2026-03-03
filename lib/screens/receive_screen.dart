@@ -74,11 +74,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            title: const Text('📶 WiFi Bağlantısı'),
+            title: const Text('📶 WiFi'),
             content: const Text(
-              'WiFi ayarlarında "SecureShare_Direct" ağına bağlanın.\n\n'
-              'Parola: share2024\n\n'
-              'Bağlandıktan sonra "Bağlandım" butonuna basın.',
+              'WiFi sazlamalarynda "SecureShare_Direct" wifiya baglanyn.\n\n'
+              'Parol: share2026\n\n'
+              'Baglanandan son "Baglandym" duwmesine basyn.',
             ),
             actions: [
               TextButton(
@@ -88,14 +88,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     _wifiConnected = true;
                   });
                 },
-                child: const Text('Bağlandım ✓'),
+                child: const Text('Baglandym ✓'),
               ),
             ],
           ),
         );
       }
     } catch (e) {
-      _showErr('WiFi ayarları açılamadı: $e');
+      _showErr('WiFi sazlamalary açylamady: $e');
     }
   }
 
@@ -105,7 +105,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (code.trim().isEmpty) return;
     
     if (!_wifiConnected) {
-      _showErr('Önce WiFi\'ye bağlanın!');
+      _showErr('Öňinçä WiFi\'ya baglanyň!');
       return;
     }
 
@@ -132,7 +132,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         });
       } else {
         final err = jsonDecode(res.body);
-        throw Exception(err['error'] ?? 'Dosya bulunamadı');
+        throw Exception(err['error'] ?? 'Faýl Tapylmady');
       }
     } catch (e) {
       setState(() => _isLoading = false);
@@ -148,7 +148,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (!status.isGranted) {
       status = await Permission.storage.request();
       if (!status.isGranted) {
-        _showErr('Depolama izni gerekli!');
+        _showErr('Требуется разрешение на хранение!');
         return;
       }
     }
@@ -190,7 +190,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         _showSuccess(filePath);
       } else {
         final err = jsonDecode(res.body);
-        throw Exception(err['error'] ?? 'İndirme hatası');
+        throw Exception(err['error'] ?? 'Ýükleme näsazlygy');
       }
     } catch (e) {
       setState(() => _isDownloading = false);
@@ -389,8 +389,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   Expanded(
                     child: Text(
                       _wifiConnected
-                          ? 'WiFi Bağlı ✓'
-                          : 'WiFi\'ye bağlanın',
+                          ? 'WiFi Bagly ✓'
+                          : 'WiFi\'ya baglanyň',
                       style: TextStyle(
                         color: _wifiConnected ? const Color(0xFF06D6A0) : const Color(0xFFF59E0B),
                         fontWeight: FontWeight.w700,
@@ -401,7 +401,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   if (!_wifiConnected)
                     TextButton(
                       onPressed: _connectToHotspot,
-                      child: const Text('Bağlan'),
+                      child: const Text('Baglan'),
                     ),
                 ],
               ),
@@ -425,7 +425,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       const Icon(Icons.info_outline_rounded, color: Color(0xFF6C63FF), size: 18),
                       const SizedBox(width: 8),
                       Text(
-                        'Nasıl Çalışır?',
+                        'Nadip Işledilýär?',
                         style: TextStyle(
                           color: txt,
                           fontWeight: FontWeight.w700,
@@ -436,9 +436,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '1. WiFi\'ye bağlan (SecureShare_Direct)\n'
-                    '2. QR kodu tara veya kodu gir\n'
-                    '3. Dosya otomatik indirilir',
+                    '1. WiFi\'ya baglan (SecureShare_Direct)\n'
+                    '2. QR kody okad ýada kody ýaz\n'
+                    '3. Faýl awtomat ýüklener',
                     style: TextStyle(color: sub, fontSize: 12, height: 1.5),
                   ),
                 ],
@@ -535,7 +535,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     );
                   });
                 } else {
-                  _showErr('Kamera izni gerekli!');
+                  _showErr('Kamera rugsady gerek!');
                 }
               },
               child: Container(
