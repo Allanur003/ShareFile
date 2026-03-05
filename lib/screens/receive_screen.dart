@@ -9,7 +9,7 @@ import '../services/app_state.dart';
 import '../services/file_server.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:permission_handler/permission_handler.dart';
+
 Future<bool> storagePermission() async {
   var status = await Permission.storage.request();
   return status.isGranted;
