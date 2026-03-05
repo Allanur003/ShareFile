@@ -9,7 +9,11 @@ import '../services/app_state.dart';
 import '../services/file_server.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
+import 'package:permission_handler/permission_handler.dart';
+Future<bool> storagePermission() async {
+  var status = await Permission.storage.request();
+  return status.isGranted;
+}
 class ReceiveScreen extends StatefulWidget {
   final FileServer fileServer;
   const ReceiveScreen({super.key, required this.fileServer});
@@ -156,31 +160,26 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     setState(() => _isDownloading = true);
 
     try {
-      final url = '${_getServerUrl()}/api/download/$code';
-      final res = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'password': _pwCtrl.text.isEmpty ? null : _pwCtrl.text,
-        }),
-      ).timeout(const Duration(minutes: 10));
+final url = '${_getServerUrl()}/api/download/$code';
+final res = await http.post(
+  Uri.parse(url),
+  headers: {'Content-Type': 'application/json'},
+  body: jsonEncode({
+    'password': _pwCtrl.text.isEmpty ? null : _pwCtrl.text,
+  }),
+);
 
-      if (res.statusCode == 200) {
-        // Dosyayı kaydet
-        Directory? dir;
-        try {
-          dir = await getExternalStorageDirectory();
-        } catch (_) {
-          dir = await getApplicationDocumentsDirectory();
-        }
-        
-        final folder = Directory('${dir!.path}/SecureShare');
-        if (!await folder.exists()) {
-          await folder.create(recursive: true);
-        }
+if (res.statusCode == 200) {
 
-        final filePath = '${folder.path}/$_filename';
-        await File(filePath).writeAsBytes(res.bodyBytes);
+  Directory dir = await getApplicationDocumentsDirectory();
+
+  final folder = Directory('${dir.path}/SecureShare');
+  if (!await folder.exists()) {
+    await folder.create(recursive: true);
+  }
+
+  final filePath = '${folder.path}/$_filename';
+  await File(filePath).writeAsBytes(res.bodyBytes);
 
         setState(() {
           _isDownloading = false;
