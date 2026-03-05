@@ -41,7 +41,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   DateTime? _expiryTime;
   bool _requiresPassword = false;
 
-  String _targetHost = '192.168.43.1'; // Hotspot varsayılan IP
+  String _targetHost = '';// Hotspot varsayılan IP
   int _targetPort = 8080;
 
   MobileScannerController? _scannerController;
@@ -103,7 +103,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  String _getServerUrl() => 'http://$_targetHost:$_targetPort';
+  String _getServerUrl() {
+  if (_targetHost.isEmpty) {
+    return 'http://192.168.43.1:$_targetPort';
+  }
+  return 'http://$_targetHost:$_targetPort';
+}
 
   Future<void> _checkFile(String code) async {
     if (code.trim().isEmpty) return;
