@@ -36,12 +36,33 @@ Future<void> _requestPermissions() async {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+
+  @override
+  void initState() {
+    super.initState();
+    requestPermissions();
+  }
+
+  Future<void> requestPermissions() async {
+    await [
+      Permission.location,
+      Permission.storage,
+      Permission.nearbyWifiDevices,
+    ].request();
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+
     return MaterialApp(
       title: 'SecureShare',
       debugShowCheckedModeBanner: false,
@@ -54,6 +75,7 @@ class MyApp extends StatelessWidget {
 
   ThemeData _buildTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
+
     return ThemeData(
       brightness: brightness,
       primaryColor: const Color(0xFF6C63FF),
