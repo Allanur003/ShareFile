@@ -152,16 +152,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   Future<void> _downloadFile() async {
     final code = _codeCtrl.text.trim().toUpperCase();
 
-    // İzin kontrolü
-    var status = await Permission.storage.status;
-    if (!status.isGranted) {
-      status = await Permission.storage.request();
-      if (!status.isGranted) {
-        _showErr('Требуется разрешение на хранение!');
-        return;
-      }
-    }
-
     setState(() => _isDownloading = true);
 
     try {
