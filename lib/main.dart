@@ -1,39 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+
 import 'services/app_state.dart';
 import 'screens/home_screen.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  
-  // İlk açılışta tüm izinleri iste
-  await _requestPermissions();
-  
+
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   runApp(
     ChangeNotifierProvider(
       create: (_) => AppState(),
       child: const MyApp(),
     ),
   );
-}
-
-Future<void> _requestPermissions() async {
-  // Platform channel ile native taraftan iste
-  const platform = MethodChannel('com.secureshare/native');
-  try {
-    await platform.invokeMethod('requestAllPermissions');
-  } catch (e) {
-    print('İzin hatası: $e');
-  }
-  
-  // Depolama izni özel kontrol (Android 11+)
-  if (await Permission.manageExternalStorage.isDenied) {
-    await platform.invokeMethod('openStorageSettings');
-  }
 }
 
 class MyApp extends StatefulWidget {
@@ -55,6 +40,7 @@ class _MyAppState extends State<MyApp> {
     await [
       Permission.location,
       Permission.storage,
+      Permission.manageExternalStorage,
       Permission.nearbyWifiDevices,
     ].request();
   }
