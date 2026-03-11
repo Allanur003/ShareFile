@@ -9,33 +9,10 @@ class WiFiManager {
   
   String? _hotspotName;
   
-  Future<String?> startHotspot() async {
-    try {
-      if (!await _requestPermissions()) {
-        throw Exception('Gerekli rugsatlar berilmedi');
-      }
-
-      final timestamp = DateTime.now().millisecondsSinceEpoch.toString().substring(8);
-      _hotspotName = '$hotspotPrefix$timestamp';
-
-      if (Platform.isAndroid) {
-        final isStarted = await WiFiForIoTPlugin.setWiFiAPEnabled(true);
-        
-        if (isStarted) {
-          await WiFiForIoTPlugin.setWiFiAPSSID(_hotspotName!);
-          await WiFiForIoTPlugin.setWiFiAPPreSharedKey(hotspotPassword);
-          
-          print('✅ Hotspot açyldy: $_hotspotName');
-          return _hotspotName;
-        }
-      }
-      
-      return null;
-    } catch (e) {
-      print('❌ Hotspot hatası: $e');
-      return null;
-    }
-  }
+Future<String?> startHotspot() async {
+  print("Hotspot'u telefondan manuel açın");
+  return null;
+}
 
   Future<void> stopHotspot() async {
     try {
@@ -78,11 +55,11 @@ class WiFiManager {
 
       print('🔌 Bağlanılıyor: $ssid');
       
-      final connected = await WiFiForIoTPlugin.connect(
-        ssid,
-        password: hotspotPassword,
-        security: NetworkSecurity.WPA,
-      );
+final connected = await WiFiForIoTPlugin.connect(
+  ssid,
+  password: hotspotPassword,
+  joinOnce: true,
+);
 
       if (connected) {
         await Future.delayed(const Duration(seconds: 2));
@@ -148,4 +125,5 @@ class WiFiManager {
   }
 
   String? get hotspotName => _hotspotName;
+
 }
